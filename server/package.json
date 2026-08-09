@@ -1,0 +1,36 @@
+{
+  "name": "template-fullstack-nest-api",
+  "version": "0.1.0",
+  "description": "Onklave template: NestJS + node-postgres API. Every route is mounted under /api.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "dev": "node --watch --require ts-node/register src/main.ts",
+    "test": "node --require ts-node/register --test test/*.test.ts",
+    "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@onklave/app-runtime": "^0.1.0",
+    "@onklave/errors": "^0.1.0",
+    "pg": "^8.22.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.21.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  }
+}
