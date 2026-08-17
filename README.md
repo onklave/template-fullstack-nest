@@ -22,6 +22,20 @@ NestJS + PostgreSQL API, deployed as two separate workloads behind one host.
                                              image: server/
 ```
 
+## If you are an agent
+
+Start at **[`AGENTS.md`](./AGENTS.md)**, not here. It answers the ten
+orientation questions for this repo and routes you to the one skill and the one
+or two architecture documents your task needs:
+
+```
+AGENTS.md → skills/<task>/SKILL.md → architecture/<rule>.md → the code
+```
+
+`architecture/` holds the rules, `decisions/` holds why they are what they are,
+and `onklave.yaml` declares both the deployment and the governance the platform
+reads before letting an agent operate here. This README is the human tour.
+
 ## The shape, and why it matters
 
 **Two services, two images, one host.** `client/` and `server/` are built
@@ -83,10 +97,40 @@ server-side and safe to expose to this app's own users — and the client starts
 browser error tracking. When it is not set the endpoint 404s and the client
 silently skips it. Local dev needs nothing.
 
+## The governed action
+
+`POST /api/items/:id/notify` is the worked example of a side effect that leaves
+the process. It is not more machinery than it needs: everything that makes it
+safe lives once, in `server/src/actions/`, and every future side effect reuses
+it.
+
+The controller turns the request into an `ActionRequest` and hands it to
+`ActionExecutor`, which runs the whole lifecycle — idempotency on
+`actionId + revision + capability`, policy (deny by default), approval pinned to
+the revision, an **authoritative re-check** that re-reads the item from
+PostgreSQL immediately before executing, provider validation, execution under a
+timeout, verification, and an audit line — then returns a **receipt**. The
+receipt's `state` is the answer; the HTTP status only mirrors it.
+
+The controller names a *capability* (`email.send`), never an implementation.
+`ProviderRegistry` resolves it to an adapter; the one registered by default is
+`ConsoleEmailProvider`, a mock that logs and sends nothing, so the app builds,
+tests and demonstrates end to end with no production credentials.
+
+Details: [`architecture/actions.md`](./architecture/actions.md),
+[`architecture/providers.md`](./architecture/providers.md),
+[`architecture/data-freshness.md`](./architecture/data-freshness.md).
+
 ## Layout
 
 ```
-onklave.yaml            the deployment contract — the only file the platform reads
+onklave.yaml            deployment + governance contract — the only file the platform reads
+AGENTS.md               agent entry point; routes to skills/ and architecture/
+DESIGN.md               what the app is for, and what may be redesigned freely
+architecture/           the rules: boundaries, data-freshness, auth, actions, providers
+skills/                 task-scoped procedures: add-feature, add-provider,
+                        add-sensitive-action, modify-schema, deploy
+decisions/              ADRs — why the rules are what they are
 client/                 the `web` service
   Dockerfile            build context is client/
   serve.js              dependency-free static server: /health + SPA fallback
@@ -100,8 +144,12 @@ server/                 the `api` service
   Dockerfile            build context is server/
   src/main.ts           bootstrap: initOnklave, /api prefix, fail-fast, timeouts
   src/onklave.ts        Onklave runtime wiring (secrets + error tracking)
-  src/app.module.ts     controllers + the PG_POOL provider
+  src/app.module.ts     controllers, the PG_POOL provider, and the governance
+                        wiring: ACTION_POLICY + the registered providers
   src/db.ts             DATABASE_URL + the pg Pool factory
+  src/actions/          the action boundary: policy, approval, authoritative
+                        re-check, idempotency, audit receipt
+  src/providers/        capability adapters + the registry (one mock: console-email)
   src/items/            /api/items controller + service (the pg seam)
   src/health.controller.ts          GET /api/healthz
   src/onklave-config.controller.ts  GET /api/onklave/config
@@ -183,7 +231,11 @@ Rules that bite:
 
 The only valid fields are `services[].{name, build{context,dockerfile},
 runtime{port,healthPath,command}, resources{cpu,memory},
-expose{enabled,auth,path}, env[]{name,required,secret}}`.
+expose{enabled,auth,path}, env[]{name,required,secret}}`, plus the top-level
+governance block — `surfaces`, `freshness`, `capabilities`, `approvals`,
+`agent.entrypoint`, `validation` — which is what the platform inspects before
+letting an agent operate here. Governance names are lowercase and dotted, and a
+colon is rejected: a validation step is `e2e`, never `test:e2e`.
 
 ## Notes for whoever grows this
 

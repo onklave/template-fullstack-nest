@@ -1,6 +1,7 @@
 # Template audit
 
-- **Last audited:** 2026-08-09
+- **Last audited:** 2026-08-17 (SDK currency refresh — see below)
+- **Initial audit:** 2026-08-09
 - **Audited by:** Onklave platform maintenance (automated, Claude Code)
 - **Next review due:** 2026-11-09 (quarterly, or sooner on a dependency alert)
 
@@ -8,6 +9,61 @@
 So we know when this template was last deliberately checked, and what was true at
 the time. Apps are generated from this repo — stale or vulnerable dependencies
 here propagate to every app created from it.
+
+---
+
+## 2026-08-17 — SDK currency refresh (Governed App Starter P0)
+
+The lockfiles pinned the SDKs at the versions published when the template was
+built. Both are now on the current release, and the declared ranges were lifted
+to the versions actually verified here so a fresh resolve cannot land below them.
+
+| Package | Was | Now | Where |
+|---|---|---|---|
+| `@onklave/errors` | 0.1.0 | **0.1.3** | `server` + `client` |
+| `@onklave/app-runtime` | 0.1.0 | **0.1.1** | `server` |
+
+**API deltas — none breaking.**
+
+- `@onklave/errors` 0.1.0 → 0.1.3 is purely additive: a new `./widget` subpath
+  export, `submitFeedback()` / `getFeedbackEnabled()` on the client and the
+  singleton, and the `FeedbackCategory` / `FeedbackPriority` types. `Transport`
+  gained an optional `body` and `json()` for the bodyless feedback-config probe.
+  Everything this template uses — `OnklaveErrors.init/captureException`,
+  `installGlobalHandlers` (browser), `OnklaveExceptionFilter` (nestjs) — is
+  unchanged, so no code adaptation was needed. Nothing here consumes the
+  feedback surface yet; the client bundle grew 143.47 kB → 144.12 kB.
+- `@onklave/app-runtime` 0.1.0 → 0.1.1 is documentation only (README status
+  line: vendored → published). No signature changed.
+
+Also picked up in the same pass: `nanoid` 3.3.17 → 3.3.18 in the client (via
+`npm audit fix`, transitive dev dependency of `@angular/build` → `postcss`),
+clearing **GHSA-2v37-7h3g-55p8** (high). The three moderate dev-only advisories
+noted in the initial audit no longer appear. Both services now report **0
+vulnerabilities**.
+
+**Re-verified after the refresh**, from a clean `npm ci` in each service:
+
+| Check | Result |
+|---|---|
+| API install / lint / test / build | Pass — 0 vulnerabilities, **39/39** tests, 16 suites |
+| Client install / typecheck / test / build | Pass — 0 vulnerabilities, **5/5** tests, 144.51 kB initial (42.84 kB transferred) |
+| `server/Dockerfile` image build | Pass |
+| Image contents / user | `dist`, `node_modules`, `package.json` only; `uid=1000(node)` |
+| Runtime against PostgreSQL 17, **no Onklave env set** | Boots, serves `/api/*`, `/api/onklave/config` 404s — the off-platform no-op path holds |
+| Governed action end to end | `POST /api/items/:id/notify` → 200 + receipt; identical retry → same receipt, **exactly one** provider send; deleted target → 422 `failed`, nothing executed |
+| Audit lines | One structured line per governed execution, no payload; **0** occurrences of the connection string in logs |
+| SIGTERM | Exits 0 (pool drained) |
+| `onklave.yaml` | Valid against the platform validator (`@onklave/shared-dto` `validateOnklaveContract`), all six governance fields parsed, 0 errors |
+
+The client toolchain requires Node ≥ 22.22.3 (`@angular/cli`); it was verified on
+Node 24.15.0. The API was verified on Node 22.22.0 and in `node:22-alpine`.
+
+Open items from the initial audit are unchanged: the `web` image still has not
+been Docker-built from this repo, and image-layer CVE scanning is still not
+wired into a pipeline.
+
+---
 
 ## Scope of this audit
 This is the **initial audit**, run as the template was created (derived from
@@ -82,12 +138,13 @@ postgres:17-alpine`), compiled output (`node dist/main.js`):
 |---|---|---|
 | @nestjs/* | ^11.0.0 | current major |
 | pg | ^8.22.0 | current |
-| @onklave/app-runtime, @onklave/errors | ^0.1.0 | published SDK |
+| @onklave/app-runtime | ^0.1.1 | published SDK (refreshed 2026-08-17) |
+| @onklave/errors | ^0.1.3 | published SDK (refreshed 2026-08-17) |
 | typescript / ts-node | ^5.7.0 / ^10.9.2 | dev-only |
 
 **`client` (web)** — unchanged from `template-fullstack-angular` (Angular
-^22.1.0 toolchain; see that template's audit for the accepted dev-only advisory
-chain) plus `@onklave/errors@^0.1.0` at runtime.
+^22.1.0 toolchain) plus `@onklave/errors@^0.1.3` at runtime. The dev-only
+advisory chain inherited from that template is clear as of 2026-08-17.
 
 ## Findings
 
