@@ -71,17 +71,25 @@ approvals:
 agent:
   entrypoint: AGENTS.md
 
-# Ordered validation commands, all of which exist in this repo:
-#   lint       server: npm run lint       (tsc --noEmit over src + test)
-#   typecheck  client: npm run typecheck
-#   test       both:   npm test
-#   build      both:   npm run build
-# Architecture tests and e2e are not declared because this repo does not have
-# them yet — see decisions/ADR-0007-deferred-p1-items.md.
+# Ordered validation commands. Every step names an npm script that exists in
+# one of the services — test/architecture.test.ts asserts that, so a step
+# cannot be declared here and quietly run nothing:
+#   lint               server: npm run lint       (tsc --noEmit over src + test)
+#   typecheck          client: npm run typecheck
+#   architecture-test  server: npm run architecture-test
+#   test               both:   npm test
+#   e2e                server: npm run e2e
+#   build              both:   npm run build
+# `npm test` in the server is a superset — it runs every suite in test/,
+# including the two named separately. They are declared in their own right
+# because they answer different questions (do the boundaries hold; does the
+# HTTP surface enforce them) and are worth running, and failing, on their own.
 validation:
   - lint
   - typecheck
+  - architecture-test
   - test
+  - e2e
   - build
 
 services:

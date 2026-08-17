@@ -28,9 +28,10 @@ in a manifest → `architecture/boundaries.md`, `architecture/auth.md`.
 | State | Home | Notes |
 |---|---|---|
 | Application data | PostgreSQL, reached via `DATABASE_URL` | The authority. |
-| Schema | `ItemsService.ensureSchema()` asserted at boot | One table so far → `skills/modify-schema/` |
+| Schema | asserted at boot: `ItemsService.ensureSchema()` + the receipt store's | Two tables → `skills/modify-schema/` |
 | Client state | Angular signals in `client/src/app/app.ts` | A **projection** of server truth, never a second source of it. |
-| In-flight action state | `ActionExecutor` (in-process) | Receipts + approvals; see `decisions/ADR-0006-in-process-action-state.md`. |
+| Action receipts | PostgreSQL, `action_receipts` | The idempotency record. Claimed with `ON CONFLICT DO NOTHING`, so a duplicate action cannot execute twice across replicas → `decisions/ADR-0008-durable-action-receipts.md`. |
+| Approvals | `ApprovalStore` (in-process) | Granted and consumed within one request. Persist before that changes → `decisions/ADR-0006-in-process-action-state.md`. |
 | Secrets | Onklave vault → `process.env` at boot | Never in this repo. See §5. |
 
 Nothing is written to local disk: containers are replaced on every deploy.
@@ -42,6 +43,7 @@ Nothing is written to local disk: containers are replaced on every deploy.
 | `client/src/app/` | Presentation. Free to redesign (see `DESIGN.md`). |
 | `server/src/items/` | The `items` domain: routes + persistence. |
 | `server/src/actions/` | The action boundary — policy, approval, re-check, idempotency, audit. |
+| `server/src/app.setup.ts` | The HTTP surface (`/api` prefix, body limit, error filter). Shared by `main.ts` and the e2e tests so they cannot drift. |
 | `server/src/providers/` | Capability adapters and the registry. The only code that talks to an external system. |
 | `server/src/db.ts` | `DATABASE_URL` and the pg pool. |
 | `server/src/onklave.ts` | Platform runtime wiring (secrets + error tracking). |
@@ -72,17 +74,24 @@ the capability; it never names an adapter → `architecture/providers.md`.
 ## 7. Where the tests are
 
 - `server/test/*.test.ts` — `node:test` via ts-node, no live database needed
-  (the seam is the `PG_POOL` provider).
+  (the seam is the `PG_POOL` provider). `npm test` runs all of them.
   - `action-executor.test.ts` — the governance rules, provider-independent.
+  - `architecture.test.ts` — the import rules in `architecture/boundaries.md`,
+    machine-enforced, plus the manifest/code agreement checks. Reads `client/`
+    and `onklave.yaml` too: it is a repository test hosted in the API's runner.
+    Also `npm run architecture-test`.
+  - `governance.e2e.test.ts` — the few governance properties that only exist at
+    the HTTP boundary. Boots the real `AppModule` on an ephemeral port; no
+    browser, no database, no deployed environment. Also `npm run e2e`.
   - `provider-contract.ts` — the shared contract **every** adapter must pass.
-  - `providers.test.ts`, `items.test.ts`, `api-exception.filter.test.ts`,
-    `onklave-config.test.ts`.
+  - `receipt-store.test.ts`, `providers.test.ts`, `items.test.ts`,
+    `api-exception.filter.test.ts`, `onklave-config.test.ts`.
 - `client/src/**/*.spec.ts` — vitest + jsdom, headless.
 
 ## 8. Commands that validate the repository
 
-Run from the service directory. These are the four steps `validation:` in
-`onklave.yaml` names.
+Run from the service directory. Between them these are the six steps
+`validation:` in `onklave.yaml` names.
 
 ```bash
 cd server && npm ci && npm run lint && npm test && npm run build
@@ -90,7 +99,18 @@ cd client && npm ci && npm run typecheck && npm test && npm run build
 ```
 
 (`server`'s `lint` is `tsc --noEmit` over `src` and `test`; the client's
-equivalent is `typecheck`.) Nothing may be reported as done until both pass.
+equivalent is `typecheck`. `npm test` in the server is a superset — it runs
+`architecture-test` and `e2e` too; those exist as separate scripts so a
+boundary or HTTP failure can be run, and read, on its own.) Nothing may be
+reported as done until both pass.
+
+**Node version.** `/.nvmrc` pins **24** — run `nvm use` before anything else.
+Each service declares its own floor in `engines` (`api` ≥ 22, `web` ≥ 22.22.3,
+which is `@angular/cli`'s), and each has an `.npmrc` with `engine-strict=true`,
+so an unsupported Node fails at `npm ci` with a message naming the version
+required, rather than several steps later inside a tool. Do not remove either
+file, and never put a registry token in an `.npmrc` — they are committed and
+copied into the Docker build context.
 
 ## 9. Which documents are authoritative
 

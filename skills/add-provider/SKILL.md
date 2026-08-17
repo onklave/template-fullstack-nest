@@ -164,7 +164,9 @@ and confirm:
 - [ ] no credential **value** anywhere in the diff, the tests or the logs;
 - [ ] the mock is still registered;
 - [ ] `onklave.yaml` (`capabilities`, `approvals`, the `api` service's `env`)
-      and `ACTION_POLICY` agree;
+      and `ACTION_POLICY` agree — `test/architecture.test.ts` fails the build if
+      they do not, and it also enforces that the adapter imports nothing beyond
+      `providers/` and `actions/action.types`;
 - [ ] `architecture/providers.md` still describes reality — if selection is now
       per organisation, say where the preference is resolved;
 - [ ] the PR description names the capability class (C or D), the side effects

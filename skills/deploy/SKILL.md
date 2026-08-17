@@ -26,8 +26,14 @@ cd server && npm ci && npm run lint && npm test && npm run build
 cd client && npm ci && npm run typecheck && npm test && npm run build
 ```
 
-These are the four steps `validation:` declares, in order. A change is not
-finished until both services are green from a clean `npm ci`.
+Between them these run the six steps `validation:` declares — the server's
+`npm test` covers `architecture-test` and `e2e` as well, and either can be run
+alone (`npm run architecture-test`, `npm run e2e`) when one fails. A change is
+not finished until both services are green from a clean `npm ci`.
+
+Run `nvm use` first: `/.nvmrc` pins the Node version, and `engine-strict=true`
+in each service's `.npmrc` makes a wrong one fail at `npm ci` rather than
+somewhere less obvious.
 
 Then check:
 

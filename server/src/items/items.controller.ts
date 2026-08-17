@@ -12,7 +12,12 @@ import {
 import type { Response } from 'express';
 import { ActionExecutor, STATUS_FOR_STATE } from '../actions/action-executor';
 import { ActionReceipt } from '../actions/action.types';
-import { EmailMessage } from '../providers/console-email.provider';
+// `import type`, deliberately: a controller may borrow an adapter's message
+// SHAPE, but importing an adapter as a value would let it bypass policy,
+// approval, the re-check and the audit record. The type import is erased at
+// compile time, so it cannot. test/architecture.test.ts enforces the
+// distinction.
+import type { EmailMessage } from '../providers/console-email.provider';
 import { Item, ItemsService } from './items.service';
 
 const MAX_NAME_LENGTH = 200;
