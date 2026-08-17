@@ -24,6 +24,66 @@
 # Exactly one service may claim `/`. To add a third (say a worker with no
 # ingress), append another entry with expose.enabled: false.
 version: 1
+
+# ---------------------------------------------------------------------------
+# Governance. Everything from here to `services:` is optional to the platform
+# and load-bearing for agents: it is what Onklave inspects before letting one
+# operate on this repo. Keep it TRUE — a declaration the code does not honour
+# is worse than no declaration.
+#
+# Names are lowercase, dot-separated (`email.send`). A colon is rejected, so a
+# validation step is `e2e`, never `test:e2e`.
+# ---------------------------------------------------------------------------
+
+# The architectural surfaces this app has. One: it draws no distinction of its
+# own between callers, because its perimeter is the Onklave gate in front of
+# the shared host. Adding an `admin` surface means adding a real check in the
+# API, not just a word here — see architecture/boundaries.md.
+surfaces:
+  - public
+
+# Data class -> freshness class. `transactional` data MUST be re-read from the
+# authority immediately before a sensitive execute; a cached value must never
+# be the evidence that an operation is still valid.
+#   items   GET /api/items      a list for a screen
+#   item    GET /api/items/:id  read on interaction
+#   actions the input to anything ActionExecutor runs
+# See architecture/data-freshness.md.
+freshness:
+  items: display
+  item: live
+  actions: transactional
+
+# What this app is allowed to do. It must match ACTION_POLICY in
+# server/src/app.module.ts, which is what actually enforces it at runtime:
+# a capability absent from that table cannot execute, however it is called.
+capabilities:
+  - email.send
+
+# Operations that need a human. `deploy.production` is a platform operation
+# (Shipyard), not an in-app capability, so it has no ACTION_POLICY entry; an
+# in-app capability listed here must be `required` in ACTION_POLICY too.
+approvals:
+  deploy.production: required
+
+# Where an agent starts. AGENTS.md answers the ten orientation questions and
+# routes to architecture/ and skills/ rather than restating them.
+agent:
+  entrypoint: AGENTS.md
+
+# Ordered validation commands, all of which exist in this repo:
+#   lint       server: npm run lint       (tsc --noEmit over src + test)
+#   typecheck  client: npm run typecheck
+#   test       both:   npm test
+#   build      both:   npm run build
+# Architecture tests and e2e are not declared because this repo does not have
+# them yet — see decisions/ADR-0007-deferred-p1-items.md.
+validation:
+  - lint
+  - typecheck
+  - test
+  - build
+
 services:
   - name: web
     build:
