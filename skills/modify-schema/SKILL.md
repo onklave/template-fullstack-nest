@@ -9,17 +9,21 @@ description: Change the PostgreSQL schema — add a column, a table or an index.
 
 ## What exists today
 
-One table, asserted at boot:
+Two tables, both asserted at boot:
 
 ```ts
-// server/src/items/items.service.ts
+// server/src/items/items.service.ts        — the domain
 async ensureSchema(): Promise<void> {
   await this.pool.query(`CREATE TABLE IF NOT EXISTS items (…)`);
 }
+
+// server/src/actions/receipt-store.ts      — action idempotency (ADR-0008)
+//   action_receipts (execution_key TEXT PRIMARY KEY, receipt JSONB, …)
 ```
 
-`main.ts` calls it before listening and exits non-zero if PostgreSQL is
-unreachable. This is migrations-lite, and it is deliberate: the container has no
+`main.ts` calls both before listening and exits non-zero if PostgreSQL is
+unreachable. Leave `action_receipts` alone unless the action boundary itself is
+the task: its primary key is what stops a governed action executing twice. This is migrations-lite, and it is deliberate: the container has no
 writable disk and is replaced on every deploy, so schema cannot live in a local
 migration state file.
 

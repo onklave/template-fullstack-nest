@@ -1,6 +1,10 @@
 # ADR-0006 — Action receipts and approvals are held in process
 
-**Status:** Accepted, with a known limit
+**Status:** Superseded in part by
+[ADR-0008](./ADR-0008-durable-action-receipts.md) — **receipts are now in
+PostgreSQL**. Approvals are still held in process, and the reasoning below still
+governs them. Kept because it records why the executor was shaped so the
+substitution was cheap when it came.
 
 ## Context
 
@@ -45,3 +49,12 @@ rewrite.
 
 Approvals need the same treatment plus an expiry the moment they are granted
 through a separate human workflow rather than within one request.
+
+---
+
+**What happened:** the receipts half was taken, in ADR-0008 — the substitution
+above, near enough verbatim, at about ninety lines. The estimate that a starter
+could not afford it was wrong, and it hid a real defect: the `Map` was read and
+written either side of an `await`, so even one process could execute a
+double-submitted action twice. Approvals remain in a `Map`, for the reason above
+and because nothing here grants one outside a single request.

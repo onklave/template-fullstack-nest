@@ -5,6 +5,7 @@ import type { Response } from 'express';
 import type { Pool } from 'pg';
 import { ActionExecutor } from '../src/actions/action-executor';
 import { ApprovalStore, PolicyRules } from '../src/actions/policy';
+import { InMemoryReceiptStore } from '../src/actions/receipt-store';
 import { requireDatabaseUrl } from '../src/db';
 import { ItemsController } from '../src/items/items.controller';
 import { Item, ItemsService } from '../src/items/items.service';
@@ -100,6 +101,7 @@ describe('POST /api/items/:id/notify — the governed action', () => {
       POLICY,
       new ProviderRegistry([new ConsoleEmailProvider()]),
       new ApprovalStore(),
+      new InMemoryReceiptStore(),
     );
     const res = { status: (code: number) => void statuses.push(code) } as unknown as Response;
     const statuses: number[] = [];

@@ -70,8 +70,15 @@ before the side effect happens**. So:
   `actionId`. For payments and email that is the correct default: an ambiguous
   failure must not silently re-fire.
 
-The store is in-process. See `decisions/ADR-0006-in-process-action-state.md`
-before scaling `api` past one replica.
+The store is PostgreSQL: one row per execution key, claimed with
+`INSERT … ON CONFLICT DO NOTHING`, so the guarantee survives more than one
+replica and more than one process lifetime. The atomicity is the primary key's,
+not the executor's — which also closes the window that used to exist between
+reading the key and writing it. `server/src/actions/receipt-store.ts`,
+`decisions/ADR-0008-durable-action-receipts.md`.
+
+Approvals are still a `Map` (`ApprovalStore`): nothing here grants one outside a
+single request. Persist them, with an expiry, before that changes.
 
 ## Approvals are pinned to a revision
 

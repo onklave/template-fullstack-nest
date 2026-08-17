@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { ActionExecutor } from '../src/actions/action-executor';
 import { ActionRequest, ActionResult } from '../src/actions/action.types';
 import { ApprovalStore, PolicyRules } from '../src/actions/policy';
+import { InMemoryReceiptStore } from '../src/actions/receipt-store';
 import { CapabilityProvider, ProviderValidation } from '../src/providers/capability-provider';
 import { ProviderRegistry } from '../src/providers/provider-registry';
 
@@ -46,7 +47,12 @@ const POLICY: PolicyRules = { 'email.send': 'automatic', 'deploy.production': 'r
 
 function build(policy: PolicyRules = POLICY, provider = new SpyProvider()) {
   const approvals = new ApprovalStore();
-  const executor = new ActionExecutor(policy, new ProviderRegistry([provider]), approvals);
+  const executor = new ActionExecutor(
+    policy,
+    new ProviderRegistry([provider]),
+    approvals,
+    new InMemoryReceiptStore(),
+  );
   return { executor, provider, approvals };
 }
 
@@ -80,7 +86,12 @@ describe('policy', () => {
 
   test('a declared capability with no adapter fails instead of guessing', async () => {
     const registry = new ProviderRegistry([]);
-    const executor = new ActionExecutor(POLICY, registry, new ApprovalStore());
+    const executor = new ActionExecutor(
+      POLICY,
+      registry,
+      new ApprovalStore(),
+      new InMemoryReceiptStore(),
+    );
 
     const receipt = await executor.execute(request(), authoritative);
 

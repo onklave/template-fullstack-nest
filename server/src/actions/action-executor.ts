@@ -10,6 +10,7 @@ import {
   executionKey,
 } from './action.types';
 import { ACTION_POLICY, ApprovalStore, PolicyRules } from './policy';
+import { RECEIPT_STORE, ReceiptStore } from './receipt-store';
 
 /**
  * THE place a privileged or irreversible operation runs. Sending email,
@@ -27,21 +28,6 @@ import { ACTION_POLICY, ApprovalStore, PolicyRules } from './policy';
  */
 @Injectable()
 export class ActionExecutor {
-  /**
-   * Execution key -> receipt. The key is reserved BEFORE the provider is
-   * called, so a double-submitted request gets the in-flight receipt back
-   * instead of a second side effect. A failed action is not retryable under
-   * the same key by design — retry with a new actionId, which is the correct
-   * behaviour for payments and email.
-   *
-   * In-process: correct for one replica, wrong for several. Move it to a
-   * PostgreSQL table with a unique index on the key before scaling `api` up or
-   * registering a provider with real side effects — the shape was chosen so
-   * that is a substitution, not a rewrite. See
-   * decisions/ADR-0006-in-process-action-state.md.
-   */
-  private readonly receipts = new Map<string, ActionReceipt>();
-
   /** Wall-clock cap on one provider call, so a hung API cannot hold a request. */
   readonly timeoutMs = Number(process.env['ACTION_TIMEOUT_MS']) || 10_000;
 
@@ -49,6 +35,17 @@ export class ActionExecutor {
     @Inject(ACTION_POLICY) private readonly policy: PolicyRules,
     private readonly providers: ProviderRegistry,
     private readonly approvals: ApprovalStore,
+    /**
+     * Execution key -> receipt. The key is reserved BEFORE the provider is
+     * called, so a double-submitted request gets the in-flight receipt back
+     * instead of a second side effect. A failed action is not retryable under
+     * the same key by design — retry with a new actionId, which is the correct
+     * behaviour for payments and email.
+     *
+     * app.module.ts wires the PostgreSQL store, so the guarantee holds across
+     * replicas and restarts. See decisions/ADR-0008-durable-action-receipts.md.
+     */
+    @Inject(RECEIPT_STORE) private readonly receipts: ReceiptStore,
   ) {}
 
   async execute(request: ActionRequest, recheck: AuthoritativeRecheck): Promise<ActionReceipt> {
@@ -57,7 +54,7 @@ export class ActionExecutor {
 
     // Idempotency: action-id + revision + capability. Already seen? Hand back
     // the receipt we already have and execute nothing.
-    const seen = this.receipts.get(key);
+    const seen = await this.receipts.find(key);
     if (seen) {
       return seen;
     }
@@ -116,14 +113,20 @@ export class ActionExecutor {
       return this.reject(receipt, 'failed', validation.error || 'invalid input');
     }
 
-    // Reserve the key before the side effect happens.
-    this.receipts.set(key, receipt);
+    // Reserve the key before the side effect happens. The check above is not
+    // enough on its own: two requests can both miss it while awaiting the
+    // re-check. This claim is atomic, so exactly one of them proceeds and the
+    // other is handed the winner's receipt.
+    const held = await this.receipts.reserve(key, receipt);
+    if (held) {
+      return held;
+    }
 
     try {
       const result = await this.withTimeout(provider.execute({ ...request, input: authoritative }));
       // Verify: a provider that reports failure is a failed action, not a
       // successful one with an error attached.
-      return this.finish(key, {
+      return await this.finish(key, {
         ...receipt,
         state: result.ok ? 'completed' : 'failed',
         output: result.ok ? result.output : undefined,
@@ -140,7 +143,11 @@ export class ActionExecutor {
           actionId: request.actionId,
         },
       });
-      return this.finish(key, { ...receipt, state: 'failed', error: 'the provider call failed' });
+      return await this.finish(key, {
+        ...receipt,
+        state: 'failed',
+        error: 'the provider call failed',
+      });
     }
   }
 
@@ -165,9 +172,9 @@ export class ActionExecutor {
   }
 
   /** Terminal receipt: audit it, then store it under the execution key. */
-  private finish(key: string, receipt: ActionReceipt): ActionReceipt {
+  private async finish(key: string, receipt: ActionReceipt): Promise<ActionReceipt> {
     const done = this.audit(receipt);
-    this.receipts.set(key, done);
+    await this.receipts.complete(key, done);
     return done;
   }
 
