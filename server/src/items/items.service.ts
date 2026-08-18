@@ -47,11 +47,27 @@ export class ItemsService implements OnApplicationShutdown {
     `);
   }
 
+  /** Freshness: `display`. A projection — safe to cache briefly. */
   async list(): Promise<Item[]> {
     const { rows } = await this.pool.query<ItemRow>(
       'SELECT id, name, created_at FROM items ORDER BY id DESC LIMIT 100',
     );
     return rows.map(toItem);
+  }
+
+  /**
+   * Freshness: `live` when a user opens one item, `transactional` when it is
+   * the target of a governed action. Both mean the same thing here — the row
+   * is read from PostgreSQL, the authority, on every call. Never serve this
+   * from a cache and never accept the client's copy of it: see
+   * architecture/data-freshness.md.
+   */
+  async get(id: string): Promise<Item | null> {
+    const { rows } = await this.pool.query<ItemRow>(
+      'SELECT id, name, created_at FROM items WHERE id = $1',
+      [id],
+    );
+    return rows.length ? toItem(rows[0]) : null;
   }
 
   async create(name: string): Promise<Item> {

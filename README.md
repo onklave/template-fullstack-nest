@@ -22,6 +22,20 @@ NestJS + PostgreSQL API, deployed as two separate workloads behind one host.
                                              image: server/
 ```
 
+## If you are an agent
+
+Start at **[`AGENTS.md`](./AGENTS.md)**, not here. It answers the ten
+orientation questions for this repo and routes you to the one skill and the one
+or two architecture documents your task needs:
+
+```
+AGENTS.md → skills/<task>/SKILL.md → architecture/<rule>.md → the code
+```
+
+`architecture/` holds the rules, `decisions/` holds why they are what they are,
+and `onklave.yaml` declares both the deployment and the governance the platform
+reads before letting an agent operate here. This README is the human tour.
+
 ## The shape, and why it matters
 
 **Two services, two images, one host.** `client/` and `server/` are built
@@ -83,12 +97,44 @@ server-side and safe to expose to this app's own users — and the client starts
 browser error tracking. When it is not set the endpoint 404s and the client
 silently skips it. Local dev needs nothing.
 
+## The governed action
+
+`POST /api/items/:id/notify` is the worked example of a side effect that leaves
+the process. It is not more machinery than it needs: everything that makes it
+safe lives once, in `server/src/actions/`, and every future side effect reuses
+it.
+
+The controller turns the request into an `ActionRequest` and hands it to
+`ActionExecutor`, which runs the whole lifecycle — idempotency on
+`actionId + revision + capability`, policy (deny by default), approval pinned to
+the revision, an **authoritative re-check** that re-reads the item from
+PostgreSQL immediately before executing, provider validation, execution under a
+timeout, verification, and an audit line — then returns a **receipt**. The
+receipt's `state` is the answer; the HTTP status only mirrors it.
+
+The controller names a *capability* (`email.send`), never an implementation.
+`ProviderRegistry` resolves it to an adapter; the one registered by default is
+`ConsoleEmailProvider`, a mock that logs and sends nothing, so the app builds,
+tests and demonstrates end to end with no production credentials.
+
+Details: [`architecture/actions.md`](./architecture/actions.md),
+[`architecture/providers.md`](./architecture/providers.md),
+[`architecture/data-freshness.md`](./architecture/data-freshness.md).
+
 ## Layout
 
 ```
-onklave.yaml            the deployment contract — the only file the platform reads
+.nvmrc                  the Node version both services are developed against
+onklave.yaml            deployment + governance contract — the only file the platform reads
+AGENTS.md               agent entry point; routes to skills/ and architecture/
+DESIGN.md               what the app is for, and what may be redesigned freely
+architecture/           the rules: boundaries, data-freshness, auth, actions, providers
+skills/                 task-scoped procedures: add-feature, add-provider,
+                        add-sensitive-action, modify-schema, deploy
+decisions/              ADRs — why the rules are what they are
 client/                 the `web` service
   Dockerfile            build context is client/
+  .npmrc                engine-strict=true — a wrong Node fails at install
   serve.js              dependency-free static server: /health + SPA fallback
   proxy.conf.json       DEV ONLY (see below)
   src/onklave.ts        fetches /api/onklave/config, starts browser error tracking
@@ -98,10 +144,18 @@ client/                 the `web` service
     *.spec.ts           vitest + jsdom
 server/                 the `api` service
   Dockerfile            build context is server/
-  src/main.ts           bootstrap: initOnklave, /api prefix, fail-fast, timeouts
+  .npmrc                engine-strict=true — a wrong Node fails at install
+  src/main.ts           bootstrap: initOnklave, schema, fail-fast, timeouts
+  src/app.setup.ts      the HTTP surface (/api prefix, body limit, error filter),
+                        shared by main.ts and the e2e tests
   src/onklave.ts        Onklave runtime wiring (secrets + error tracking)
-  src/app.module.ts     controllers + the PG_POOL provider
+  src/app.module.ts     controllers, the PG_POOL provider, and the governance
+                        wiring: ACTION_POLICY + the registered providers
   src/db.ts             DATABASE_URL + the pg Pool factory
+  src/actions/          the action boundary: policy, approval, authoritative
+                        re-check, idempotency, audit receipt; receipt-store.ts
+                        keeps idempotency in PostgreSQL, not in memory
+  src/providers/        capability adapters + the registry (one mock: console-email)
   src/items/            /api/items controller + service (the pg seam)
   src/health.controller.ts          GET /api/healthz
   src/onklave-config.controller.ts  GET /api/onklave/config
@@ -109,9 +163,26 @@ server/                 the `api` service
   test/                 node:test via ts-node, no live PostgreSQL required
 ```
 
+## Node version
+
+`.nvmrc` pins **Node 24**; run `nvm use` before anything else. Each service also
+declares its own floor in `engines` — `api` ≥ 22, `web` ≥ 22.22.3, which is what
+`@angular/cli` requires — and each has an `.npmrc` with `engine-strict=true`.
+
+That last file is the point: without it, `npm ci` on an unsupported Node prints
+a warning and installs anyway, and you find out several commands later from a
+tool that has no idea why you ran it. With it, the install stops and names the
+version it needs. Both `.npmrc` files are copied into their Docker build
+context for the same reason, so a base-image bump below the floor fails at
+`npm ci` rather than at runtime. **Never put a registry token in either** —
+they are committed.
+
 ## Local development
 
 ```bash
+# 0. The Node version this repo is developed against (see .nvmrc).
+nvm use
+
 # 1. A database.
 docker run -d --name dev-pg -p 5432:5432 \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=app postgres:17-alpine
@@ -140,9 +211,33 @@ cd client && npm run build && npm run serve   # :3000, serving dist/browser
 ## Tests
 
 ```bash
-cd server && npm test    # node:test — items service, config endpoint, error shapes
+cd server && npm test    # node:test — every suite below
 cd client && npm test    # vitest + jsdom — service URL shape, component render, error path
 ```
+
+Two of the server's suites are also validation steps in their own right, and are
+worth knowing about before you go looking for where a rule is enforced:
+
+```bash
+cd server && npm run architecture-test   # the import rules, machine-enforced
+cd server && npm run e2e                 # governance at the HTTP boundary
+```
+
+`architecture-test` walks the imports of both services and fails on a boundary
+crossing — the client reaching into the server, a controller holding an adapter,
+an adapter reaching into the domain, a `process.env` in browser code. It also
+checks that `capabilities:` in `onklave.yaml` matches `ACTION_POLICY` in the
+code and that every `validation:` step names a script that exists, so the
+manifest cannot quietly stop being true. The rules it enforces are the table in
+[`architecture/boundaries.md`](./architecture/boundaries.md); change both or
+neither.
+
+`e2e` boots the real application on an ephemeral port and asserts only what
+cannot be seen below HTTP: that `/api` is not optional, that freshness headers
+reach the wire, that a duplicate action across two separate requests causes one
+side effect, that an unauthorised capability is refused at the API, and that no
+credential appears in any response body. **No browser, no database, no deployed
+environment** — Node's own `fetch` against `@nestjs/testing`.
 
 The API tests use a fake `Pool` and never open a database connection. The seam
 is the `PG_POOL` provider in `server/src/app.module.ts`: `ItemsService` is
@@ -183,7 +278,11 @@ Rules that bite:
 
 The only valid fields are `services[].{name, build{context,dockerfile},
 runtime{port,healthPath,command}, resources{cpu,memory},
-expose{enabled,auth,path}, env[]{name,required,secret}}`.
+expose{enabled,auth,path}, env[]{name,required,secret}}`, plus the top-level
+governance block — `surfaces`, `freshness`, `capabilities`, `approvals`,
+`agent.entrypoint`, `validation` — which is what the platform inspects before
+letting an agent operate here. Governance names are lowercase and dotted, and a
+colon is rejected: a validation step is `e2e`, never `test:e2e`.
 
 ## Notes for whoever grows this
 

@@ -4,12 +4,15 @@
 # Build context is ./client (see onklave.yaml) — paths below are relative to it.
 #
 # Node 24 ("Krypton") is the Active LTS line, supported until 2028-04-30, and
-# is the minimum Angular 22 accepts.
+# is the minimum Angular 22 accepts. It is also what /.nvmrc pins for local
+# development, so the image and a developer's shell agree.
 
 # --- Build stage: compile the Angular app to dist/browser ---
 FROM node:26-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
+# .npmrc carries engine-strict=true (and nothing else, ever), so a base image
+# below the `engines` floor fails here rather than several steps later.
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 COPY . .
 RUN npm run build
