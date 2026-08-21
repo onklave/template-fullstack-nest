@@ -22,7 +22,7 @@
     "@angular/core": "^22.1.2",
     "@angular/forms": "^22.1.2",
     "@angular/platform-browser": "^22.1.0",
-    "@onklave/errors": "^0.1.3",
+    "@onklave/errors": "^0.1.4",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
